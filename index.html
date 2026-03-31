@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Thermostat Trainer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="thermostat" aria-label="Thermostat trainer">
+      <div class="frame">
+        <div class="lcd" id="lcd">
+          <div class="lcd-top">
+            <div class="day" id="dayLabel">WED</div>
+            <div class="clock" id="clockLabel">12:02</div>
+          </div>
+
+          <div class="lcd-main">
+            <div class="room-block">
+              <div class="small-icon">⌂</div>
+              <div class="small-label">ROOM TEMP</div>
+              <div class="big-temp"><span id="roomTemp">16.0</span><span class="unit">°C</span></div>
+            </div>
+
+            <div class="set-block">
+              <div class="mode-row">
+                <span class="gear">⚙</span>
+                <span class="mode-name" id="modeLabel">MANUAL</span>
+              </div>
+              <div class="set-value"><span id="setTemp">22</span><span class="unit">°C</span></div>
+              <div class="small-label set-text" id="setLabel">SET TEMP</div>
+            </div>
+          </div>
+
+          <div class="lcd-status-row">
+            <div class="status-pill" id="statusPill">HEATING OFF</div>
+            <button class="hint-chip" id="hintBtn" type="button">HINT</button>
+          </div>
+
+          <div class="task-box">
+            <div class="task-line"><span class="task-tag" id="taskLevel">SIMPLE</span><span id="taskText">Set manual temperature to 21°C.</span></div>
+            <div class="feedback-line" id="feedbackText">Press buttons to begin.</div>
+            <div class="hint-line" id="hintText">Hint ready.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button class="thermo-btn" id="powerBtn" type="button" aria-label="Power button">⏻</button>
+        <button class="thermo-btn" id="modeBtn" type="button" aria-label="Mode button">M</button>
+        <button class="thermo-btn" id="clockBtn" type="button" aria-label="Clock button">◷</button>
+        <button class="thermo-btn" id="upBtn" type="button" aria-label="Up button">△</button>
+        <button class="thermo-btn" id="downBtn" type="button" aria-label="Down button">▽</button>
+      </div>
+
+      <div class="utility-row">
+        <button class="utility-btn" id="checkBtn" type="button">Check task</button>
+        <button class="utility-btn" id="newTaskBtn" type="button">New task</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      power: true,
+      controlMode: 'manual',
+      editor: 'home',
+      editorField: 0,
+      dayIndex: 3,
+      hour: 12,
+      minute: 2,
+      roomTemp: 16.0,
+      setTemp: 22,
+      auto: {
+        morningHour: 6,
+        morningMinute: 30,
+        morningTemp: 20,
+        eveningHour: 17,
+        eveningMinute: 0,
+        eveningTemp: 22,
+        enabled: false
+      },
+      selectedProgram: 0,
+      currentTaskIndex: 0,
+      buttonFlash: ''
+    };
+
+    const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+    const tasks = [
+      {
+        level: 'SIMPLE',
+        text: 'Set manual temperature to 21°C.',
+        hint: 'Use M until MANUAL shows, then use △ or ▽ to reach 21°C.',
+        check: () => state.controlMode === 'manual' && state.setTemp === 21
+      },
+      {
+        level: 'SIMPLE',
+        text: 'Change the clock to 07:30.',
+        hint: 'Press ◷ to edit the time. Use M to swap between hour and minute. Use △ and ▽ to adjust.',
+        check: () => state.hour === 7 && state.minute === 30
+      },
+      {
+        level: 'SIMPLE',
+        text: 'Switch the thermostat to automatic mode.',
+        hint: 'Press M until AUTO shows on the screen.',
+        check: () => state.controlMode === 'auto'
+      },
+      {
+        level: 'ADVANCED',
+        text: 'Set automatic morning heating to 06:30 at 20°C.',
+        hint: 'Press M until AUTO shows, then press ◷ to open programme editing. Use M to move across time and temperature fields.',
+        check: () => state.controlMode === 'auto' && state.auto.morningHour === 6 && state.auto.morningMinute === 30 && state.auto.morningTemp === 20
+      },
+      {
+        level: 'ADVANCED',
+        text: 'Set the evening programme to 17:00 at 22°C.',
+        hint: 'In programme editing, use ◷ to swap between P1 and P2. P2 is the evening programme.',
+        check: () => state.auto.eveningHour === 17 && state.auto.eveningMinute === 0 && state.auto.eveningTemp === 22
+      },
+      {
+        level: 'ADVANCED',
+        text: 'Turn the thermostat off.',
+        hint: 'Press the power button ⏻.',
+        check: () => state.power === false
+      }
+    ];
+
+    const el = {
+      dayLabel: document.getElementById('dayLabel'),
+      clockLabel: document.getElementById('clockLabel'),
+      roomTemp: document.getElementById('roomTemp'),
+      setTemp: document.getElementById('setTemp'),
+      modeLabel: document.getElementById('modeLabel'),
+      setLabel: document.getElementById('setLabel'),
+      statusPill: document.getElementById('statusPill'),
+      taskLevel: document.getElementById('taskLevel'),
+      taskText: document.getElementById('taskText'),
+      feedbackText: document.getElementById('feedbackText'),
+      hintText: document.getElementById('hintText'),
+      lcd: document.getElementById('lcd'),
+      buttons: {
+        power: document.getElementById('powerBtn'),
+        mode: document.getElementById('modeBtn'),
+        clock: document.getElementById('clockBtn'),
+        up: document.getElementById('upBtn'),
+        down: document.getElementById('downBtn')
+      }
+    };
+
+    function pad(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    function cycleMode() {
+      const order = ['manual', 'auto'];
+      const current = order.indexOf(state.controlMode);
+      state.controlMode = order[(current + 1) % order.length];
+      if (state.controlMode === 'auto') state.auto.enabled = true;
+      state.editor = 'home';
+      state.editorField = 0;
+      setFeedback('Mode changed.');
+    }
+
+    function cycleProgram() {
+      state.selectedProgram = state.selectedProgram === 0 ? 1 : 0;
+      state.editorField = 0;
+      setFeedback(state.selectedProgram === 0 ? 'Editing morning programme.' : 'Editing evening programme.');
+    }
+
+    function pressFlash(key) {
+      state.buttonFlash = key;
+      Object.entries(el.buttons).forEach(([name, node]) => {
+        node.classList.toggle('pressed', name === key);
+      });
+      setTimeout(() => {
+        Object.values(el.buttons).forEach((node) => node.classList.remove('pressed'));
+      }, 140);
+    }
+
+    function setFeedback(message) {
+      el.feedbackText.textContent = message;
+    }
+
+    function currentTask() {
+      return tasks[state.currentTaskIndex];
+    }
+
+    function updateTaskDisplay() {
+      const task = currentTask();
+      el.taskLevel.textContent = task.level;
+      el.taskText.textContent = task.text;
+    }
+
+    function getAutoActiveTemp() {
+      const nowMinutes = state.hour * 60 + state.minute;
+      const morningMinutes = state.auto.morningHour * 60 + state.auto.morningMinute;
+      const eveningMinutes = state.auto.eveningHour * 60 + state.auto.eveningMinute;
+      if (nowMinutes >= eveningMinutes) return state.auto.eveningTemp;
+      if (nowMinutes >= morningMinutes) return state.auto.morningTemp;
+      return Math.min(state.auto.morningTemp - 2, state.auto.eveningTemp);
+    }
+
+    function getDisplayedSetTemp() {
+      if (state.controlMode === 'auto' && state.auto.enabled && state.editor !== 'program') {
+        return getAutoActiveTemp();
+      }
+      if (state.editor === 'program') {
+        return state.selectedProgram === 0 ? state.auto.morningTemp : state.auto.eveningTemp;
+      }
+      return state.setTemp;
+    }
+
+    function getModeText() {
+      if (!state.power) return 'OFF';
+      if (state.editor === 'clock') return 'SET CLOCK';
+      if (state.editor === 'program') return state.selectedProgram === 0 ? 'AUTO P1' : 'AUTO P2';
+      return state.controlMode === 'manual' ? 'MANUAL' : 'AUTO';
+    }
+
+    function getSetLabel() {
+      if (state.editor === 'clock') return state.editorField === 0 ? 'SET HOUR' : 'SET MIN';
+      if (state.editor === 'program') {
+        return ['P TIME H', 'P TIME M', 'P TEMP'][state.editorField];
+      }
+      return state.controlMode === 'auto' ? 'ACTIVE SET' : 'SET TEMP';
+    }
+
+    function getStatusText() {
+      if (!state.power) return 'POWER OFF';
+      const activeSet = getDisplayedSetTemp();
+      if (state.roomTemp < activeSet) return state.controlMode === 'auto' ? 'AUTO HEATING' : 'HEATING ON';
+      return state.controlMode === 'auto' ? 'AUTO STANDBY' : 'HEATING OFF';
+    }
+
+    function renderClock() {
+      if (state.editor === 'program') {
+        const h = state.selectedProgram === 0 ? state.auto.morningHour : state.auto.eveningHour;
+        const m = state.selectedProgram === 0 ? state.auto.morningMinute : state.auto.eveningMinute;
+        const hourText = state.editorField === 0 ? '<span class="lcd-edit">' + pad(h) + '</span>' : pad(h);
+        const minuteText = state.editorField === 1 ? '<span class="lcd-edit">' + pad(m) + '</span>' : pad(m);
+        return 'P' + (state.selectedProgram + 1) + ' ' + hourText + ':' + minuteText;
+      }
+      if (state.editor === 'clock') {
+        const hourText = state.editorField === 0 ? '<span class="lcd-edit">' + pad(state.hour) + '</span>' : pad(state.hour);
+        const minuteText = state.editorField === 1 ? '<span class="lcd-edit">' + pad(state.minute) + '</span>' : pad(state.minute);
+        return hourText + ':' + minuteText;
+      }
+      return pad(state.hour) + ':' + pad(state.minute);
+    }
+
+    function renderSetTemp() {
+      const value = getDisplayedSetTemp();
+      if (state.editor === 'program' && state.editorField === 2) {
+        return '<span class="lcd-edit">' + value + '</span>';
+      }
+      return String(value);
+    }
+
+    function renderScreen() {
+      el.dayLabel.textContent = days[state.dayIndex];
+      el.clockLabel.innerHTML = renderClock();
+      el.roomTemp.textContent = state.power ? state.roomTemp.toFixed(1) : '--.-';
+      el.setTemp.innerHTML = state.power ? renderSetTemp() : '--';
+      el.modeLabel.textContent = getModeText();
+      el.setLabel.textContent = getSetLabel();
+      el.statusPill.textContent = getStatusText();
+      el.lcd.classList.toggle('screen-off', !state.power);
+      updateTaskDisplay();
+    }
+
+    function adjustValue(delta) {
+      if (!state.power) return;
+      if (state.editor === 'clock') {
+        if (state.editorField === 0) {
+          state.hour = (state.hour + delta + 24) % 24;
+        } else {
+          state.minute = (state.minute + delta + 60) % 60;
+        }
+        setFeedback('Clock changed.');
+        return;
+      }
+
+      if (state.editor === 'program') {
+        const prefix = state.selectedProgram === 0 ? 'morning' : 'evening';
+        if (state.editorField === 0) {
+          state.auto[prefix + 'Hour'] = (state.auto[prefix + 'Hour'] + delta + 24) % 24;
+        } else if (state.editorField === 1) {
+          state.auto[prefix + 'Minute'] = (state.auto[prefix + 'Minute'] + delta + 60) % 60;
+        } else {
+          state.auto[prefix + 'Temp'] = Math.max(10, Math.min(30, state.auto[prefix + 'Temp'] + delta));
+        }
+        state.auto.enabled = true;
+        setFeedback('Programme changed.');
+        return;
+      }
+
+      state.setTemp = Math.max(10, Math.min(30, state.setTemp + delta));
+      setFeedback('Set temperature changed.');
+    }
+
+    function handleClockButton() {
+      if (!state.power) return;
+      if (state.controlMode === 'auto') {
+        if (state.editor === 'program') {
+          cycleProgram();
+        } else {
+          state.editor = 'program';
+          state.editorField = 0;
+          state.selectedProgram = 0;
+          state.auto.enabled = true;
+          setFeedback('Programme editing opened.');
+        }
+        return;
+      }
+
+      if (state.editor === 'clock') {
+        state.editorField = (state.editorField + 1) % 2;
+        setFeedback(state.editorField === 0 ? 'Editing hour.' : 'Editing minute.');
+      } else {
+        state.editor = 'clock';
+        state.editorField = 0;
+        setFeedback('Clock editing opened.');
+      }
+    }
+
+    function handleModeButton() {
+      if (!state.power) return;
+      if (state.editor === 'clock') {
+        state.editorField = (state.editorField + 1) % 2;
+        setFeedback(state.editorField === 0 ? 'Editing hour.' : 'Editing minute.');
+        return;
+      }
+      if (state.editor === 'program') {
+        state.editorField = (state.editorField + 1) % 3;
+        setFeedback(['Editing programme hour.', 'Editing programme minute.', 'Editing programme temperature.'][state.editorField]);
+        return;
+      }
+      cycleMode();
+    }
+
+    function exitEditorAfterDelay() {
+      clearTimeout(window.exitEditorTimer);
+      window.exitEditorTimer = setTimeout(() => {
+        if (state.editor !== 'home') {
+          state.editor = 'home';
+          state.editorField = 0;
+          setFeedback('Settings saved.');
+          renderScreen();
+        }
+      }, 3500);
+    }
+
+    function checkTask() {
+      if (currentTask().check()) {
+        setFeedback('Correct. Task completed.');
+      } else {
+        setFeedback('Not quite. Try again or press HINT.');
+      }
+      renderScreen();
+    }
+
+    function nextTask() {
+      state.currentTaskIndex = Math.floor(Math.random() * tasks.length);
+      el.hintText.textContent = 'Hint ready.';
+      setFeedback('New task loaded.');
+      renderScreen();
+    }
+
+    function showHint() {
+      el.hintText.textContent = currentTask().hint;
+      setFeedback('Hint shown.');
+    }
+
+    function tickRoomTemperature() {
+      if (!state.power) return;
+      const activeSet = getDisplayedSetTemp();
+      if (state.roomTemp < activeSet) {
+        state.roomTemp = Math.min(activeSet, +(state.roomTemp + 0.1).toFixed(1));
+      } else if (state.roomTemp > activeSet + 0.4) {
+        state.roomTemp = +(state.roomTemp - 0.1).toFixed(1);
+      }
+      renderScreen();
+    }
+
+    el.buttons.power.addEventListener('click', () => {
+      pressFlash('power');
+      state.power = !state.power;
+      state.editor = 'home';
+      state.editorField = 0;
+      setFeedback(state.power ? 'Thermostat on.' : 'Thermostat off.');
+      renderScreen();
+    });
+
+    el.buttons.mode.addEventListener('click', () => {
+      pressFlash('mode');
+      handleModeButton();
+      renderScreen();
+      exitEditorAfterDelay();
+    });
+
+    el.buttons.clock.addEventListener('click', () => {
+      pressFlash('clock');
+      handleClockButton();
+      renderScreen();
+      exitEditorAfterDelay();
+    });
+
+    el.buttons.up.addEventListener('click', () => {
+      pressFlash('up');
+      adjustValue(1);
+      renderScreen();
+      exitEditorAfterDelay();
+    });
+
+    el.buttons.down.addEventListener('click', () => {
+      pressFlash('down');
+      adjustValue(-1);
+      renderScreen();
+      exitEditorAfterDelay();
+    });
+
+    document.getElementById('checkBtn').addEventListener('click', checkTask);
+    document.getElementById('newTaskBtn').addEventListener('click', nextTask);
+    document.getElementById('hintBtn').addEventListener('click', showHint);
+
+    renderScreen();
+    setInterval(tickRoomTemperature, 2200);
+  </script>
+</body>
+</html>
