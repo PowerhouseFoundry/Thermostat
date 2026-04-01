@@ -120,6 +120,16 @@ body {
 }
 
 
+.day-edit {
+  min-width: 3.4em;
+  text-align: center;
+}
+
+.temp-edit {
+  min-width: 1.2em;
+  text-align: center;
+}
+
 .room-block,
 .set-block {
   display: grid;

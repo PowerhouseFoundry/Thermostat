@@ -25,7 +25,7 @@
 
             <div class="set-block">
               <div class="mode-row">
-                <span class="gear">⚙</span>
+                <span class="gear" id="statusIcon">☼</span>
                 <span class="mode-name" id="modeLabel">MANUAL</span>
               </div>
               <div class="set-value"><span id="setTemp">22</span><span class="unit">°C</span></div>
@@ -83,7 +83,9 @@
       },
       selectedProgram: 0,
       currentTaskIndex: 0,
-      buttonFlash: ''
+      buttonFlash: '',
+      clockHoldTimer: null,
+      clockHoldTriggered: false
     };
 
     const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -92,37 +94,37 @@
       {
         level: 'SIMPLE',
         text: 'Set manual temperature to 21°C.',
-        hint: 'Use M until MANUAL shows, then use △ or ▽ to reach 21°C.',
-        check: () => state.controlMode === 'manual' && state.setTemp === 21
+        hint: 'Press M until MANUAL shows. Then press △ or ▽ until the set temperature is 21°C.',
+        check: () => state.controlMode === 'manual' && state.editor === 'home' && state.setTemp === 21
       },
       {
         level: 'SIMPLE',
-        text: 'Change the clock to 07:30.',
-        hint: 'Press ◷ to edit the time. Use M to swap between hour and minute. Use △ and ▽ to adjust.',
-        check: () => state.hour === 7 && state.minute === 30
+        text: 'Change the main clock to 07:30.',
+        hint: 'Press and hold the ◷ button for about 3 seconds. Use △ or ▽ to change the flashing value. Press ◷ again to move from hour to minute, then day.',
+        check: () => state.hour === 7 && state.minute === 30 && state.editor !== 'program'
       },
       {
         level: 'SIMPLE',
         text: 'Switch the thermostat to automatic mode.',
-        hint: 'Press M until AUTO shows on the screen.',
-        check: () => state.controlMode === 'auto'
+        hint: 'Press M until AUTO shows on the right side of the screen.',
+        check: () => state.controlMode === 'auto' && state.editor === 'home'
       },
       {
         level: 'ADVANCED',
-        text: 'Set automatic morning heating to 06:30 at 20°C.',
-        hint: 'Press M until AUTO shows, then press ◷ to open programme editing. Use M to move across time and temperature fields.',
+        text: 'Set the morning programme to 06:30 at 20°C.',
+        hint: 'Press M until AUTO shows. Press ◷ once to open programme editing. P1 is the morning programme. Use M to move across hour, minute and temperature, then △ or ▽ to change them.',
         check: () => state.controlMode === 'auto' && state.auto.morningHour === 6 && state.auto.morningMinute === 30 && state.auto.morningTemp === 20
       },
       {
         level: 'ADVANCED',
         text: 'Set the evening programme to 17:00 at 22°C.',
-        hint: 'In programme editing, use ◷ to swap between P1 and P2. P2 is the evening programme.',
-        check: () => state.auto.eveningHour === 17 && state.auto.eveningMinute === 0 && state.auto.eveningTemp === 22
+        hint: 'In AUTO mode, press ◷ to open programme editing. Press ◷ again to switch from P1 to P2. Then use M and △ ▽ to set 17:00 and 22°C.',
+        check: () => state.controlMode === 'auto' && state.auto.eveningHour === 17 && state.auto.eveningMinute === 0 && state.auto.eveningTemp === 22
       },
       {
         level: 'ADVANCED',
         text: 'Turn the thermostat off.',
-        hint: 'Press the power button ⏻.',
+        hint: 'Press the ⏻ button once.',
         check: () => state.power === false
       }
     ];
@@ -133,6 +135,7 @@
       roomTemp: document.getElementById('roomTemp'),
       setTemp: document.getElementById('setTemp'),
       modeLabel: document.getElementById('modeLabel'),
+      statusIcon: document.getElementById('statusIcon'),
       setLabel: document.getElementById('setLabel'),
       statusPill: document.getElementById('statusPill'),
       taskLevel: document.getElementById('taskLevel'),
@@ -153,32 +156,6 @@
       return String(n).padStart(2, '0');
     }
 
-    function cycleMode() {
-      const order = ['manual', 'auto'];
-      const current = order.indexOf(state.controlMode);
-      state.controlMode = order[(current + 1) % order.length];
-      if (state.controlMode === 'auto') state.auto.enabled = true;
-      state.editor = 'home';
-      state.editorField = 0;
-      setFeedback('Mode changed.');
-    }
-
-    function cycleProgram() {
-      state.selectedProgram = state.selectedProgram === 0 ? 1 : 0;
-      state.editorField = 0;
-      setFeedback(state.selectedProgram === 0 ? 'Editing morning programme.' : 'Editing evening programme.');
-    }
-
-    function pressFlash(key) {
-      state.buttonFlash = key;
-      Object.entries(el.buttons).forEach(([name, node]) => {
-        node.classList.toggle('pressed', name === key);
-      });
-      setTimeout(() => {
-        Object.values(el.buttons).forEach((node) => node.classList.remove('pressed'));
-      }, 140);
-    }
-
     function setFeedback(message) {
       el.feedbackText.textContent = message;
     }
@@ -193,17 +170,26 @@
       el.taskText.textContent = task.text;
     }
 
+    function pressFlash(key) {
+      Object.entries(el.buttons).forEach(([name, node]) => {
+        node.classList.toggle('pressed', name === key);
+      });
+      setTimeout(() => {
+        Object.values(el.buttons).forEach((node) => node.classList.remove('pressed'));
+      }, 140);
+    }
+
     function getAutoActiveTemp() {
       const nowMinutes = state.hour * 60 + state.minute;
       const morningMinutes = state.auto.morningHour * 60 + state.auto.morningMinute;
       const eveningMinutes = state.auto.eveningHour * 60 + state.auto.eveningMinute;
       if (nowMinutes >= eveningMinutes) return state.auto.eveningTemp;
       if (nowMinutes >= morningMinutes) return state.auto.morningTemp;
-      return Math.min(state.auto.morningTemp - 2, state.auto.eveningTemp);
+      return Math.max(5, state.auto.morningTemp - 2);
     }
 
     function getDisplayedSetTemp() {
-      if (state.controlMode === 'auto' && state.auto.enabled && state.editor !== 'program') {
+      if (state.controlMode === 'auto' && state.auto.enabled && state.editor === 'home') {
         return getAutoActiveTemp();
       }
       if (state.editor === 'program') {
@@ -214,23 +200,27 @@
 
     function getModeText() {
       if (!state.power) return 'OFF';
-      if (state.editor === 'clock') return 'SET CLOCK';
+      if (state.editor === 'clock') return 'CLOCK';
       if (state.editor === 'program') return state.selectedProgram === 0 ? 'AUTO P1' : 'AUTO P2';
       return state.controlMode === 'manual' ? 'MANUAL' : 'AUTO';
     }
 
     function getSetLabel() {
-      if (state.editor === 'clock') return state.editorField === 0 ? 'SET HOUR' : 'SET MIN';
+      if (state.editor === 'clock') {
+        return ['SET HOUR', 'SET MIN', 'SET DAY'][state.editorField];
+      }
       if (state.editor === 'program') {
         return ['P TIME H', 'P TIME M', 'P TEMP'][state.editorField];
       }
-      return state.controlMode === 'auto' ? 'ACTIVE SET' : 'SET TEMP';
+      return state.controlMode === 'auto' ? 'SET' : 'SET';
     }
 
     function getStatusText() {
       if (!state.power) return 'POWER OFF';
       const activeSet = getDisplayedSetTemp();
-      if (state.roomTemp < activeSet) return state.controlMode === 'auto' ? 'AUTO HEATING' : 'HEATING ON';
+      if (state.roomTemp < activeSet) {
+        return state.controlMode === 'auto' ? 'AUTO HEATING' : 'HEATING ON';
+      }
       return state.controlMode === 'auto' ? 'AUTO STANDBY' : 'HEATING OFF';
     }
 
@@ -242,41 +232,65 @@
         const minuteText = state.editorField === 1 ? '<span class="lcd-edit">' + pad(m) + '</span>' : pad(m);
         return 'P' + (state.selectedProgram + 1) + ' ' + hourText + ':' + minuteText;
       }
-      if (state.editor === 'clock') {
-        const hourText = state.editorField === 0 ? '<span class="lcd-edit">' + pad(state.hour) + '</span>' : pad(state.hour);
-        const minuteText = state.editorField === 1 ? '<span class="lcd-edit">' + pad(state.minute) + '</span>' : pad(state.minute);
-        return hourText + ':' + minuteText;
-      }
-      return pad(state.hour) + ':' + pad(state.minute);
+
+      const dayText = state.editor === 'clock' && state.editorField === 2
+        ? '<span class="lcd-edit day-edit">' + days[state.dayIndex] + '</span>'
+        : days[state.dayIndex];
+      const hourText = state.editor === 'clock' && state.editorField === 0
+        ? '<span class="lcd-edit">' + pad(state.hour) + '</span>'
+        : pad(state.hour);
+      const minuteText = state.editor === 'clock' && state.editorField === 1
+        ? '<span class="lcd-edit">' + pad(state.minute) + '</span>'
+        : pad(state.minute);
+      el.dayLabel.innerHTML = dayText;
+      return hourText + ':' + minuteText;
     }
 
     function renderSetTemp() {
       const value = getDisplayedSetTemp();
       if (state.editor === 'program' && state.editorField === 2) {
-        return '<span class="lcd-edit">' + value + '</span>';
+        return '<span class="lcd-edit temp-edit">' + value + '</span>';
       }
       return String(value);
     }
 
     function renderScreen() {
-      el.dayLabel.textContent = days[state.dayIndex];
+      if (state.editor !== 'clock') {
+        el.dayLabel.textContent = days[state.dayIndex];
+      }
       el.clockLabel.innerHTML = renderClock();
       el.roomTemp.textContent = state.power ? state.roomTemp.toFixed(1) : '--.-';
       el.setTemp.innerHTML = state.power ? renderSetTemp() : '--';
       el.modeLabel.textContent = getModeText();
+      el.statusIcon.textContent = state.controlMode === 'auto' ? '⚙' : '☼';
       el.setLabel.textContent = getSetLabel();
       el.statusPill.textContent = getStatusText();
       el.lcd.classList.toggle('screen-off', !state.power);
       updateTaskDisplay();
     }
 
+    function cycleMode() {
+      const order = ['manual', 'auto'];
+      const current = order.indexOf(state.controlMode);
+      state.controlMode = order[(current + 1) % order.length];
+      if (state.controlMode === 'auto') {
+        state.auto.enabled = true;
+      }
+      state.editor = 'home';
+      state.editorField = 0;
+      setFeedback('Mode changed.');
+    }
+
     function adjustValue(delta) {
       if (!state.power) return;
+
       if (state.editor === 'clock') {
         if (state.editorField === 0) {
           state.hour = (state.hour + delta + 24) % 24;
-        } else {
+        } else if (state.editorField === 1) {
           state.minute = (state.minute + delta + 60) % 60;
+        } else {
+          state.dayIndex = (state.dayIndex + delta + 7) % 7;
         }
         setFeedback('Clock changed.');
         return;
@@ -289,58 +303,71 @@
         } else if (state.editorField === 1) {
           state.auto[prefix + 'Minute'] = (state.auto[prefix + 'Minute'] + delta + 60) % 60;
         } else {
-          state.auto[prefix + 'Temp'] = Math.max(10, Math.min(30, state.auto[prefix + 'Temp'] + delta));
+          state.auto[prefix + 'Temp'] = Math.max(5, Math.min(35, state.auto[prefix + 'Temp'] + delta));
         }
         state.auto.enabled = true;
         setFeedback('Programme changed.');
         return;
       }
 
-      state.setTemp = Math.max(10, Math.min(30, state.setTemp + delta));
+      state.setTemp = Math.max(5, Math.min(35, state.setTemp + delta));
       setFeedback('Set temperature changed.');
     }
 
-    function handleClockButton() {
+    function handleModeButton() {
       if (!state.power) return;
+
+      if (state.editor === 'clock') {
+        state.editorField = (state.editorField + 1) % 3;
+        setFeedback(['Editing hour.', 'Editing minute.', 'Editing day.'][state.editorField]);
+        return;
+      }
+
+      if (state.editor === 'program') {
+        state.editorField = (state.editorField + 1) % 3;
+        setFeedback(['Editing programme hour.', 'Editing programme minute.', 'Editing programme temperature.'][state.editorField]);
+        return;
+      }
+
+      cycleMode();
+    }
+
+    function handleClockShortPress() {
+      if (!state.power) return;
+      if (state.editor === 'clock') {
+        state.editorField = (state.editorField + 1) % 3;
+        setFeedback(['Editing hour.', 'Editing minute.', 'Editing day.'][state.editorField]);
+        return;
+      }
+
       if (state.controlMode === 'auto') {
         if (state.editor === 'program') {
-          cycleProgram();
+          state.selectedProgram = state.selectedProgram === 0 ? 1 : 0;
+          state.editorField = 0;
+          setFeedback(state.selectedProgram === 0 ? 'Editing morning programme.' : 'Editing evening programme.');
         } else {
           state.editor = 'program';
-          state.editorField = 0;
           state.selectedProgram = 0;
+          state.editorField = 0;
           state.auto.enabled = true;
           setFeedback('Programme editing opened.');
         }
         return;
       }
 
-      if (state.editor === 'clock') {
-        state.editorField = (state.editorField + 1) % 2;
-        setFeedback(state.editorField === 0 ? 'Editing hour.' : 'Editing minute.');
-      } else {
-        state.editor = 'clock';
-        state.editorField = 0;
-        setFeedback('Clock editing opened.');
-      }
+      setFeedback('Hold ◷ for the main clock.');
     }
 
-    function handleModeButton() {
+    function handleClockLongPress() {
       if (!state.power) return;
-      if (state.editor === 'clock') {
-        state.editorField = (state.editorField + 1) % 2;
-        setFeedback(state.editorField === 0 ? 'Editing hour.' : 'Editing minute.');
-        return;
-      }
-      if (state.editor === 'program') {
-        state.editorField = (state.editorField + 1) % 3;
-        setFeedback(['Editing programme hour.', 'Editing programme minute.', 'Editing programme temperature.'][state.editorField]);
-        return;
-      }
-      cycleMode();
+      state.editor = 'clock';
+      state.editorField = 0;
+      setFeedback('Clock editing opened.');
+      renderScreen();
+      resetExitEditorTimer();
     }
 
-    function exitEditorAfterDelay() {
+    function resetExitEditorTimer() {
       clearTimeout(window.exitEditorTimer);
       window.exitEditorTimer = setTimeout(() => {
         if (state.editor !== 'home') {
@@ -349,7 +376,12 @@
           setFeedback('Settings saved.');
           renderScreen();
         }
-      }, 3500);
+      }, 4000);
+    }
+
+    function showHint() {
+      el.hintText.textContent = currentTask().hint;
+      setFeedback('Hint shown.');
     }
 
     function checkTask() {
@@ -368,11 +400,6 @@
       renderScreen();
     }
 
-    function showHint() {
-      el.hintText.textContent = currentTask().hint;
-      setFeedback('Hint shown.');
-    }
-
     function tickRoomTemperature() {
       if (!state.power) return;
       const activeSet = getDisplayedSetTemp();
@@ -382,6 +409,21 @@
         state.roomTemp = +(state.roomTemp - 0.1).toFixed(1);
       }
       renderScreen();
+    }
+
+    function startClockHold() {
+      if (!state.power) return;
+      state.clockHoldTriggered = false;
+      clearTimeout(state.clockHoldTimer);
+      state.clockHoldTimer = setTimeout(() => {
+        state.clockHoldTriggered = true;
+        pressFlash('clock');
+        handleClockLongPress();
+      }, 700);
+    }
+
+    function endClockHold() {
+      clearTimeout(state.clockHoldTimer);
     }
 
     el.buttons.power.addEventListener('click', () => {
@@ -397,28 +439,34 @@
       pressFlash('mode');
       handleModeButton();
       renderScreen();
-      exitEditorAfterDelay();
+      resetExitEditorTimer();
     });
 
-    el.buttons.clock.addEventListener('click', () => {
-      pressFlash('clock');
-      handleClockButton();
-      renderScreen();
-      exitEditorAfterDelay();
+    el.buttons.clock.addEventListener('pointerdown', startClockHold);
+    el.buttons.clock.addEventListener('pointerup', () => {
+      endClockHold();
+      if (!state.clockHoldTriggered) {
+        pressFlash('clock');
+        handleClockShortPress();
+        renderScreen();
+        resetExitEditorTimer();
+      }
     });
+    el.buttons.clock.addEventListener('pointerleave', endClockHold);
+    el.buttons.clock.addEventListener('pointercancel', endClockHold);
 
     el.buttons.up.addEventListener('click', () => {
       pressFlash('up');
       adjustValue(1);
       renderScreen();
-      exitEditorAfterDelay();
+      resetExitEditorTimer();
     });
 
     el.buttons.down.addEventListener('click', () => {
       pressFlash('down');
       adjustValue(-1);
       renderScreen();
-      exitEditorAfterDelay();
+      resetExitEditorTimer();
     });
 
     document.getElementById('checkBtn').addEventListener('click', checkTask);
